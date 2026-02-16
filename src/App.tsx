@@ -1,19 +1,21 @@
 import { useEffect, useRef } from "react";
 import { attachInputListeners, createInput } from "./game/input";
 import { createPlayer, drawPlayer, updatePlayer } from "./game/player";
-import { drawBullets, spawnBullet, updateBullets, type Bullet } from "./game/bullets";
+import { drawBullets, spawnBullet, spawnBulletByAngle, updateBullets, type Bullet } from "./game/bullets";
 import {
   drawEnemies,
   handleBulletEnemyCollisions,
   playerIsHit,
   spawnEnemy,
+  spawnBoss,
   updateEnemies,
   type Enemy,
 } from "./game/enemies";
+import { pick3RandomUpgrades, type Upgrade } from "./game/upgrades";
 
 export default function App() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
+const canvasRef = useRef<HTMLCanvasElement | null>(null);
+const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -42,39 +44,98 @@ export default function App() {
     const bullets: Bullet[] = [];
     const enemies: Enemy[] = [];
 
-    // shooting
+    // --- combat stats (upgrades modify these) ---
+    let fireRate = 10; // bullets/sec
+    let bulletSpeed = 650;
+    let bulletDamage = 1;
     let shootCooldown = 0;
-    const fireRate = 10;
-    const bulletSpeed = 650;
+    let multiShotLevel = 0; // 0=single, 1=3 bullets, 2=5 bullets
 
-    // enemies / difficulty
+    // --- enemies/difficulty ---
     let spawnTimer = 0;
-    let spawnEvery = 0.9; // seconds between spawns (will slowly get faster)
+    let spawnEvery = 0.9;
     let difficultyTimer = 0;
 
-    // game state
+    let bossTimer = 0;
+    const bossEvery = 30; // seconds
+    let bossAlive = false;
+
+    // --- game state ---
     let score = 0;
     let gameOver = false;
+
+    // --- restart edge trigger (pressed once) ---
     let wasRDown = false;
 
-    let last = performance.now();
+    // --- XP / level up system ---
+    let level = 1;
+    let xp = 0;
+    let xpToNext = 5;
+
+    let isLevelUp = false;
+    let choices: Upgrade[] = [];
+
+    function applyUpgrade(u: Upgrade) {
+      switch (u.id) {
+        case "fireRateUp":
+          fireRate *= 1.2;
+          break;
+        case "damageUp":
+          bulletDamage += 1;
+          break;
+        case "moveSpeedUp":
+          player.speed *= 1.12;
+          break;
+        case "bulletSpeedUp":
+          bulletSpeed *= 1.15;
+          break;
+        case "maxHpUp":
+          player.maxHp += 1;
+          player.hp = Math.min(player.maxHp, player.hp + 1);
+          break;
+        case "multiShot":
+          multiShotLevel = Math.min(2, multiShotLevel + 1);
+          break;
+      }
+    }
 
     function resetGame(w: number, h: number) {
       bullets.length = 0;
       enemies.length = 0;
+      multiShotLevel = 0;
+      bossTimer = 0;
+      bossAlive = false;
 
-      player.hp = player.maxHp;
-      player.invuln = 0;
+      // reset player
       player.x = w / 2;
       player.y = h / 2;
+      player.hp = player.maxHp;
+      player.invuln = 0;
+      player.speed = 260;
 
+      // reset stats
+      fireRate = 10;
+      bulletSpeed = 650;
+      bulletDamage = 1;
+      shootCooldown = 0;
+
+      // reset game
       score = 0;
       gameOver = false;
+
       spawnTimer = 0;
       spawnEvery = 0.9;
       difficultyTimer = 0;
-      shootCooldown = 0;
+
+      // reset XP/level
+      level = 1;
+      xp = 0;
+      xpToNext = 5;
+      isLevelUp = false;
+      choices = [];
     }
+
+    let last = performance.now();
 
     function loop(now: number) {
       const dt = Math.min(0.033, (now - last) / 1000);
@@ -83,31 +144,80 @@ export default function App() {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
 
-      // restart on R
+      // --- restart on R (pressed once) ---
       const isRDown = input.keys.has("r");
       const rJustPressed = isRDown && !wasRDown;
-
-      if(rJustPressed){
-        resetGame(w, h);
-      }
-
+      if (rJustPressed) resetGame(w, h);
       wasRDown = isRDown;
 
-      if (!gameOver) {
-        // update player
+      // --- if leveling up, let player choose 1/2/3 ---
+      if (isLevelUp) {
+        const k = input.keys;
+        const pick = k.has("1") ? 0 : k.has("2") ? 1 : k.has("3") ? 2 : -1;
+
+        if (pick !== -1) {
+          applyUpgrade(choices[pick]);
+          isLevelUp = false;
+          choices = [];
+        }
+      }
+
+      // --- update only if NOT game over and NOT in level up menu ---
+      if (!gameOver && !isLevelUp) {
+        // player invuln countdown
+        player.invuln = Math.max(0, player.invuln - dt);
+
+        // movement
         updatePlayer(player, input, dt, { w, h });
 
-        // shoot
+        bossTimer += dt;
+        if (!bossAlive && bossTimer >= bossEvery) {
+          bossTimer = 0;
+          enemies.push(spawnBoss({ w, h }));
+          bossAlive = true;
+        }
+
+        // shooting
         shootCooldown = Math.max(0, shootCooldown - dt);
+
         if (input.mouse.down && shootCooldown === 0) {
-          const b = spawnBullet({
-          fromX: player.x,
-          fromY: player.y,
-          toX: input.mouse.x,
-          toY: input.mouse.y,
-          speed: bulletSpeed,
-          });
-          if (b) bullets.push(b);
+          const baseAngle = Math.atan2(input.mouse.y - player.y, input.mouse.x - player.x);
+
+          if (multiShotLevel === 0) {
+            const b = spawnBullet({
+              fromX: player.x,
+              fromY: player.y,
+              toX: input.mouse.x,
+              toY: input.mouse.y,
+              speed: bulletSpeed,
+            });
+            if (b) bullets.push(b);
+          } else {
+            // spread in radians
+            const spread = multiShotLevel === 1 ? 0.18 : 0.28; // ~10° or ~16°
+            const angles =
+            multiShotLevel === 1
+            ? [baseAngle - spread, baseAngle, baseAngle + spread]
+            : [
+              baseAngle - 2 * spread,
+              baseAngle - spread,
+              baseAngle,
+              baseAngle + spread,
+              baseAngle + 2 * spread,
+            ];
+
+            for (const a of angles) {
+              bullets.push(
+                spawnBulletByAngle({
+                  fromX: player.x,
+                  fromY: player.y,
+                  angleRad: a,
+                  speed: bulletSpeed,
+                })
+              );
+            }
+          }
+
           shootCooldown = 1 / fireRate;
         }
 
@@ -127,32 +237,45 @@ export default function App() {
           spawnEvery = Math.max(0.25, spawnEvery * 0.92);
         }
 
-        // move enemies
+        // enemy movement
         updateEnemies(enemies, player, dt);
 
-        // collisions
+        // bullet-enemy collisions
         handleBulletEnemyCollisions({
           bullets,
           enemies,
-          bulletDamage: 1,
-          onKill: () => {
-          score += 1;
+          bulletDamage,
+          onKill: (kind) => {
+            if(kind === "boss"){
+              score += 2;
+              xp += 10;
+              bossAlive = false;
+            } else {
+              score += 1;
+              xp += 1;
+            }
+
+            if (xp >= xpToNext) {
+              level += 1;
+              xp = 0;
+              xpToNext = Math.ceil(xpToNext * 1.35);
+
+              isLevelUp = true;
+              choices = pick3RandomUpgrades();
+            }            
           },
         });
 
+        // player damage
         if (playerIsHit(player, enemies) && player.invuln === 0) {
           player.hp -= 1;
-          player.invuln = 1; // 1 second invulnerability
+          player.invuln = 1;
 
-          if (player.hp <= 0) {
-            gameOver = true;
-          }
+          if (player.hp <= 0) gameOver = true;
         }
-
-        player.invuln = Math.max(0, player.invuln - dt);
       }
 
-      // draw
+      // --- draw ---
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = "black";
       ctx.fillRect(0, 0, w, h);
@@ -173,23 +296,57 @@ export default function App() {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = "14px system-ui";
       ctx.fillText("WASD move • Hold click shoot • R restart", 12, 22);
-      ctx.fillText(`Score: ${score}`, 12, 42);
-      ctx.fillText(`Enemies: ${enemies.length}`, 12, 62);
-      ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, 12, 82);
+      ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, 12, 42);
+      ctx.fillText(`Score: ${score}`, 12, 62);
+      ctx.fillText(`Level: ${level}`, 12, 82);
+      ctx.fillText(`XP: ${xp}/${xpToNext}`, 12, 102);
+      ctx.fillText(`Multi-shot: ${multiShotLevel}`, 12, 122);
 
       if (gameOver) {
-      ctx.fillStyle = "rgba(0,0,0,0.65)";
-      ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "rgba(0,0,0,0.65)";
+        ctx.fillRect(0, 0, w, h);
 
-      ctx.fillStyle = "white";
-      ctx.font = "40px system-ui";
-      ctx.textAlign = "center";
-      ctx.fillText("GAME OVER", w / 2, h / 2 - 10);
+        ctx.fillStyle = "white";
+        ctx.font = "40px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", w / 2, h / 2 - 10);
 
-      ctx.font = "18px system-ui";
-      ctx.fillText(`Score: ${score}`, w / 2, h / 2 + 24);
-      ctx.fillText("Press R to restart", w / 2, h / 2 + 52);
-      ctx.textAlign = "start";
+        ctx.font = "18px system-ui";
+        ctx.fillText(`Score: ${score}`, w / 2, h / 2 + 24);
+        ctx.fillText("Press R to restart", w / 2, h / 2 + 52);
+        ctx.textAlign = "start";
+      }
+
+      if (isLevelUp) {
+        ctx.fillStyle = "rgba(0,0,0,0.75)";
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.font = "28px system-ui";
+        ctx.fillText("LEVEL UP!", w / 2, 90);
+
+        ctx.font = "16px system-ui";
+        ctx.fillText("Press 1, 2, or 3 to choose:", w / 2, 120);
+
+        const startY = 170;
+        for (let i = 0; i < choices.length; i++) {
+          const u = choices[i];
+          const y = startY + i * 90;
+
+          ctx.fillStyle = "rgba(255,255,255,0.12)";
+          ctx.fillRect(w / 2 - 260, y - 30, 520, 70);
+
+          ctx.fillStyle = "white";
+          ctx.font = "18px system-ui";
+          ctx.fillText(`${i + 1}) ${u.title}`, w / 2, y);
+
+          ctx.fillStyle = "rgba(255,255,255,0.85)";
+          ctx.font = "14px system-ui";
+          ctx.fillText(u.description, w / 2, y + 24);
+        }
+
+        ctx.textAlign = "start";
       }
 
       rafRef.current = requestAnimationFrame(loop);
@@ -198,9 +355,9 @@ export default function App() {
     rafRef.current = requestAnimationFrame(loop);
 
     return () => {
-    window.removeEventListener("resize", resize);
-    detach();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      window.removeEventListener("resize", resize);
+      detach();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 

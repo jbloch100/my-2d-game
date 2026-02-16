@@ -7,6 +7,7 @@ export type Enemy = {
 	r: number;
 	speed: number;
 	hp: number;
+	kind: "normal" | "boss";
 };
 
 export function spawnEnemy(bounds: { w: number; h: number }): Enemy {
@@ -37,6 +38,19 @@ export function spawnEnemy(bounds: { w: number; h: number }): Enemy {
 		r: 14,
 		speed: 120 + Math.random() * 60,
 		hp: 2,
+		kind: "normal",
+	};
+}
+
+export function spawnBoss(bounds: { w: number; h: number }): Enemy {
+	// spawn from top
+	return {
+		x: bounds.w / 2,
+		y: -60,
+		r: 42,
+		speed: 85,
+		hp: 60,
+		kind: "boss",
 	};
 }
 
@@ -55,32 +69,37 @@ export function updateEnemies(enemies: Enemy[], player: Player, dt: number) {
 
 export function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
 	for (const e of enemies) {
+		const isBoss = e.kind === "boss";
+
 		// body
 		ctx.beginPath();
 		ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
-		ctx.fillStyle = "rgba(255,80,80,1)";
+		ctx.fillStyle = isBoss ? "rgba(190,80,255,1)" : "rgba(255,80,80,1)";
 		ctx.fill();
 
-		// tiny hp bar
-		const barW = 28;
-		const barH = 5;
+		// hp bar
+		const barW = isBoss ? 120 : 28;
+		const barH = isBoss ? 10 : 5;
 		const px = e.x - barW / 2;
-		const py = e.y - e.r - 12;
+		const py = e.y - e.r - (isBoss ? 18 : 12);
 
 		ctx.fillStyle = "rgba(0,0,0,0.6)";
 		ctx.fillRect(px, py, barW, barH);
 
-		const hpPct = Math.max(0, Math.min(1, e.hp / 2));
+		// For normal enemies hp max is 2; for boss use 60
+		const maxHp = isBoss ? 60 : 2;
+		const hpPct = Math.max(0, Math.min(1, e.hp / maxHp));
+
 		ctx.fillStyle = "rgba(255,255,255,0.9)";
 		ctx.fillRect(px, py, barW * hpPct, barH);
 	}
 }
 
 export function handleBulletEnemyCollisions(args: {
-bullets: Bullet[];
-enemies: Enemy[];
-bulletDamage: number;
-onKill?: () => void;
+	bullets: Bullet[];
+	enemies: Enemy[];
+	bulletDamage: number;
+	onKill?: (kind: Enemy["kind"]) => void;
 }) {
 	const { bullets, enemies, bulletDamage, onKill } = args;
 
@@ -103,7 +122,7 @@ onKill?: () => void;
 
 				if (e.hp <= 0) {
 					enemies.splice(ei, 1);
-					onKill?.();
+					onKill?.(e.kind);
 				}
 
 				break; // bullet is gone, stop checking this bullet

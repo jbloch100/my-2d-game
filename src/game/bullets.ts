@@ -60,3 +60,22 @@ export function drawBullets(ctx: CanvasRenderingContext2D, bullets: Bullet[]) {
 		ctx.fill();
 	}
 }
+
+export function spawnBulletByAngle(args: {
+	fromX: number;
+	fromY: number;
+	angleRad: number;
+	speed: number;
+}): Bullet {
+	const ux = Math.cos(args.angleRad);
+	const uy = Math.sin(args.angleRad);
+
+	return {
+		x: args.fromX,
+		y: args.fromY,
+		vx: ux * args.speed,
+		vy: uy * args.speed,
+		r: 4,
+		life: 1.2,
+	};
+}
