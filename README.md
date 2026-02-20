@@ -1,73 +1,68 @@
-# React + TypeScript + Vite
+# Arena Survivor (React + TypeScript + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A fast, top-down 2D arena shooter built with **React + TypeScript** and rendered on an **HTML Canvas**.  
+Survive escalating waves, level up with upgrades, and defeat the boss.
 
-Currently, two official plugins are available:
+## Live Demo
+- (Add your Vercel link here after deploy)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Controls
+- **WASD** — Move  
+- **Left Click (hold)** — Shoot  
+- **ESC** — Pause / Resume  
+- **R** — Restart run (in-game)
 
-## React Compiler
+## Features
+- Real-time game loop with `requestAnimationFrame`
+- Player movement + shooting with **multi-shot upgrade**
+- Enemy spawning + difficulty scaling over time
+- **Boss enemy** with ranged attacks (boss projectiles)
+- XP + Leveling system with **3 upgrade choices**
+- Particle explosions + screen shake (game feel polish)
+- Start menu, pause menu, game over menu (React overlays)
+- Run summary (time survived, kills, boss kills, final level/score)
+- **Shareable run code** + copy-to-clipboard
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tech Stack
+- **React** (UI + menus)
+- **TypeScript** (typed game state and systems)
+- **Vite** (dev + build)
+- **Canvas 2D** (rendering)
 
-## Expanding the ESLint configuration
+## Architecture (Frontend Engineering Focus)
+This project separates responsibilities cleanly:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **UI Layer (React components)**  
+  Menus and overlays live in `src/ui/*` and receive typed props.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **Game Engine (custom hook)**  
+  `src/game/useGameEngine.ts` owns the main loop, physics-ish updates, collision checks, and drawing.  
+  React state only controls the *phase* (`menu | playing | paused | gameover`) and receives the final run summary.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- **Game Modules**
+  - `src/game/player.ts` — player model + update/draw
+  - `src/game/enemies.ts` — enemy/boss logic + collisions
+  - `src/game/bullets.ts` — bullets update/spawn helpers
+  - `src/game/particles.ts` — explosions/particles
+  - `src/game/upgrades.ts` — upgrade definitions + random selection
+  - `src/game/input.ts` — keyboard/mouse input handling
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Why I Built This
+I wanted a project that demonstrates real frontend skills:
+- state modeling and separation of concerns
+- performant rendering (Canvas loop outside React re-renders)
+- typed architecture (TypeScript everywhere)
+- clean UI structure (components + props)
+- deploying a complete product
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Future Improvements
+- Boss HP bar + boss phases (50% HP behavior change)
+- Sound effects + volume settings
+- Mobile controls / responsive layout
+- More enemy types + weapon upgrades
+- Persist best runs (localStorage)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Running Locally
+```bash
+npm install
+npm run dev

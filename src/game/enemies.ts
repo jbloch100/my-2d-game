@@ -99,7 +99,7 @@ export function handleBulletEnemyCollisions(args: {
 	bullets: Bullet[];
 	enemies: Enemy[];
 	bulletDamage: number;
-	onKill?: (kind: Enemy["kind"]) => void;
+	onKill?: (info: { kind: Enemy["kind"]; x: number; y: number }) => void;
 }) {
 	const { bullets, enemies, bulletDamage, onKill } = args;
 
@@ -122,7 +122,7 @@ export function handleBulletEnemyCollisions(args: {
 
 				if (e.hp <= 0) {
 					enemies.splice(ei, 1);
-					onKill?.(e.kind);
+					onKill?.({ kind: e.kind, x: e.x, y: e.y });
 				}
 
 				break; // bullet is gone, stop checking this bullet
