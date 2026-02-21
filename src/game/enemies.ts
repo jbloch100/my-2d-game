@@ -46,10 +46,10 @@ export function spawnBoss(bounds: { w: number; h: number }): Enemy {
 	// spawn from top
 	return {
 		x: bounds.w / 2,
-		y: -60,
-		r: 42,
-		speed: 85,
-		hp: 60,
+		y: 90,
+		r: 38,
+		speed: 70,
+		hp: 80,
 		kind: "boss",
 	};
 }

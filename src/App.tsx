@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { StartMenu } from "./ui/StartMenu";
 import { PauseMenu } from "./ui/PauseMenu";
 import { GameOverMenu } from "./ui/GameOverMenu";
+import { VictoryMenu } from "./ui/VictoryMenu";
 import { useGameEngine } from "./game/useGameEngine";
 import type { Phase, RunSummary } from "./types";
+
 
 function summarizeUpgrades(upgrades: string[]) {
   if (upgrades.length === 0) return "No upgrades";
@@ -33,6 +35,44 @@ export default function App() {
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [sfxVolume, setSfxVolume] = useState(() => {
+    const v = localStorage.getItem("sfxVolume");
+    return v ? Number(v) : 0.6;
+  });
+
+  const [sfxMuted, setSfxMuted] = useState(() => {
+    return localStorage.getItem("sfxMuted") === "1";
+  });
+
+
+  const [highScore, setHighScore] = useState(() => {
+    const raw = localStorage.getItem("highScore");
+    if (!raw) return { bestScore: 0, bestLevel: 0, bestTimeSec: 0 };
+
+    try {
+      const parsed = JSON.parse(raw) as { bestScore?: number; bestLevel?: number; bestTimeSec?: number };
+      return {
+        bestScore: parsed.bestScore ?? 0,
+        bestLevel: parsed.bestLevel ?? 0,
+        bestTimeSec: parsed.bestTimeSec ?? 0,
+      };
+    } catch {
+      return { bestScore: 0, bestLevel: 0, bestTimeSec: 0 };
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("highScore", JSON.stringify(highScore));
+  }, [highScore]);
+
+  useEffect(() => {
+    localStorage.setItem("sfxVolume", String(sfxVolume));
+  }, [sfxVolume]);
+
+  useEffect(() => {
+    localStorage.setItem("sfxMuted", sfxMuted ? "1" : "0");
+  }, [sfxMuted]);
+
   // Keep a ref of phase for the engine loop
   const phaseRef = useRef<Phase>(phase);
   useEffect(() => {
@@ -45,6 +85,10 @@ export default function App() {
     setPhase,
     setRunSummary,
     setCopied,
+    sfxVolume,
+    sfxMuted,
+    highScore,
+    setHighScore,
   });
 
   const runCode = runSummary ? buildRunCode(runSummary) : "";
@@ -80,6 +124,11 @@ export default function App() {
               requestStart();
               setPhase("playing");
             }}
+            sfxVolume={sfxVolume}
+            setSfxVolume={setSfxVolume}
+            sfxMuted={sfxMuted}
+            setSfxMuted={setSfxMuted}
+            highScore={highScore}
           />
         )}
 
@@ -95,6 +144,10 @@ export default function App() {
               setCopied(false);
               setPhase("menu");
             }}
+            sfxVolume={sfxVolume}
+            setSfxVolume={setSfxVolume}
+            sfxMuted={sfxMuted}
+            setSfxMuted={setSfxMuted}
           />
         )}
 
@@ -115,6 +168,25 @@ export default function App() {
             }}
           />
         )}
+        
+        {phase === "victory" && (
+          <VictoryMenu
+            summary={runSummary}
+            runCode={runCode}
+            copied={copied}
+            onCopy={copyRunCode}
+            onRestart={() => {
+              setCopied(false);
+              requestStart();
+              setPhase("playing");
+            }}
+            onMenu={() => {
+              setCopied(false);
+              setPhase("menu");
+            }}
+          />
+        )}
+
       </div>
     </div>
   );
