@@ -1,7 +1,9 @@
-// src/game/useGameEngine.ts
 import { useEffect, useRef } from "react";
+import { createAbilityRuntime } from "./abilities";
 import { attachInputListeners, createInput } from "./input";
 import { createPlayer, updatePlayer, drawPlayer } from "./player";
+import type { CharacterId, MetaUpgrades } from "../meta/save";
+import { CHARACTERS } from "../meta/characters";
 import {
   spawnBullet,
   spawnBulletByAngle,
@@ -22,12 +24,25 @@ import {
   drawParticles,
   spawnExplosion,
   updateParticles,
+  spawnTrail,
+  spawnDamageText,
   type Particle,
 } from "./particles";
 import type { Phase, RunSummary } from "../types";
-import { createAudio } from "./audio";
+import { audio } from "./audio";
 
 type HighScore = { bestScore: number; bestLevel: number; bestTimeSec: number };
+
+type DamageText = {
+  x: number;
+  y: number;
+  vy: number;
+  life: number;     // seconds left
+  maxLife: number;  // for fade
+  value: number;
+  isBoss?: boolean;
+  isKill?: boolean;
+};
 
 export function useGameEngine(args: {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -41,8 +56,17 @@ export function useGameEngine(args: {
   sfxMuted: boolean;
 
   // high score persistence handled by App
-  setHighScore: (hs: HighScore) => void;
   highScore: HighScore;
+  setHighScore: (hs: HighScore) => void;
+
+  // META progression
+  metaUpgrades: MetaUpgrades;
+  addShards: (amount: number) => void;
+
+  // character selection
+  selectedCharacter: CharacterId;
+
+  onBossMusic?: (active: boolean) => void;
 }) {
   const rafRef = useRef<number | null>(null);
   const startRequestedRef = useRef(false);
@@ -67,7 +91,6 @@ export function useGameEngine(args: {
     const c = ctx;
 
     // audio
-    const audio = createAudio();
     audio.preload();
     audio.setVolume(args.sfxVolume);
     audio.setMuted(args.sfxMuted);
@@ -93,6 +116,7 @@ export function useGameEngine(args: {
     const enemies: Enemy[] = [];
     const particles: Particle[] = [];
     const enemyBullets: Bullet[] = [];
+    const dmgTexts: DamageText[] = [];
 
     // combat stats
     let fireRate = 10; // bullets/sec
@@ -135,6 +159,16 @@ export function useGameEngine(args: {
     let xpToNext = 5;
     let isLevelUp = false;
     let choices: Upgrade[] = [];
+
+    // juice
+    let hitStop = 0;      // seconds of freeze-frame
+    let playerFlash = 0;  // seconds of white flash overlay on player
+    let levelUpFlash = 0; // seconds
+    let zoomKick = 0;     // 0..1
+
+    // ✅ abilities runtime must live in engine scope (NOT inside applyMetaUpgrades)
+    let ability = createAbilityRuntime(CHARACTERS[args.selectedCharacter]);
+    let wasSpaceDown = false; // SPACE edge press
 
     function applyUpgrade(u: Upgrade) {
       upgradesPicked.push(u.title);
@@ -180,34 +214,79 @@ export function useGameEngine(args: {
       if (isBetter) args.setHighScore(candidate);
     }
 
+    function awardShardsOnce() {
+      // Simple formula that "feels fair"
+      // tweak whenever you want
+      const earned =
+        Math.floor(score / 10) + bossKills * 15 + Math.min(30, Math.floor(runTime / 10));
+
+      args.addShards(earned);
+    }
+
+    // ✅ only stats go here (character base + meta upgrades)
+    function applyMetaUpgrades() {
+      const m = args.metaUpgrades;
+      const ch = CHARACTERS[args.selectedCharacter];
+
+      // base from character
+      player.maxHp = ch.maxHp;
+      player.hp = player.maxHp;
+
+      bulletDamage = ch.damage;
+      fireRate = ch.fireRate;
+      player.speed = ch.speed;
+
+      // apply meta progression on top
+      player.maxHp = player.maxHp + m.hp;
+      player.hp = player.maxHp;
+
+      bulletDamage = bulletDamage + m.damage;
+
+      fireRate = fireRate * Math.pow(1.08, m.fireRate);
+      player.speed = player.speed * Math.pow(1.06, m.moveSpeed);
+
+      multiShotLevel = m.multiShotStart > 0 ? 1 : 0;
+    }
+
     function resetGame(w: number, h: number) {
       bullets.length = 0;
       enemies.length = 0;
       particles.length = 0;
       enemyBullets.length = 0;
+      hitStop = 0;
+      playerFlash = 0;
 
       // boss reset
       bossShootTimer = 0;
       bossTimer = 0;
-      bossAlive = false;
+      bossAlive = false;  
+      args.onBossMusic?.(false);  // ✅ back to gameplay music
 
-      // ✅ reset warning banner too
+      // warning banner reset
       showBossWarning = false;
       bossWarningTimer = 0;
 
-      // reset player
+      // reset player position + invuln
       player.x = w / 2;
       player.y = h / 2;
-      player.hp = player.maxHp;
       player.invuln = 0;
-      player.speed = 260;
 
-      // reset stats
+      // reset base combat stats (defaults)
       fireRate = 10;
       bulletSpeed = 650;
       bulletDamage = 1;
       shootCooldown = 0;
       multiShotLevel = 0;
+
+      // reset base movement stats
+      player.speed = 260;
+
+      // ✅ reset ability runtime for the current character
+      ability = createAbilityRuntime(CHARACTERS[args.selectedCharacter]);
+      wasSpaceDown = false;
+
+      // ✅ apply character base stats + meta progression
+      applyMetaUpgrades();
 
       // reset feel
       score = 0;
@@ -239,8 +318,17 @@ export function useGameEngine(args: {
     let last = performance.now();
 
     function loop(now: number) {
-      const dt = Math.min(0.033, (now - last) / 1000);
+      const rawDt = Math.min(0.033, (now - last) / 1000);
       last = now;
+
+      // timers always tick using real time
+      hitStop = Math.max(0, hitStop - rawDt);
+      playerFlash = Math.max(0, playerFlash - rawDt);
+      levelUpFlash = Math.max(0, levelUpFlash - rawDt);
+      zoomKick = Math.max(0, zoomKick - rawDt * 4.5); // fades fast
+
+      // dt used for gameplay updates (freeze updates during hitstop)
+      const dt = hitStop > 0 ? 0 : rawDt;
 
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -291,6 +379,41 @@ export function useGameEngine(args: {
       // ----- UPDATE (only in playing and not levelup) -----
       if (currentPhase === "playing" && !isLevelUp) {
         runTime += dt;
+
+        // ability cooldowns tick down
+        ability.dashCd = Math.max(0, ability.dashCd - dt);
+
+        if (ability.guardReady === false) {
+          ability.guardCd = Math.max(0, ability.guardCd - dt);
+          if (ability.guardCd === 0) ability.guardReady = true;
+        }
+
+        // dash active timer
+        ability.dashTime = Math.max(0, ability.dashTime - dt);
+
+        // SPACE dash (scout)
+        const spaceDown = input.keys.has(" ");
+        const spaceJustPressed = spaceDown && !wasSpaceDown;
+        wasSpaceDown = spaceDown;
+
+        const chDef = CHARACTERS[args.selectedCharacter];
+        if (
+          chDef.ability.kind === "dash" &&
+          spaceJustPressed &&
+          ability.dashCd === 0
+        ) {
+          const a = chDef.ability;
+
+          const dx = input.mouse.x - player.x;
+          const dy = input.mouse.y - player.y;
+          const len = Math.hypot(dx, dy) || 1;
+
+          ability.dashVX = (dx / len) * a.dashSpeed;
+          ability.dashVY = (dy / len) * a.dashSpeed;
+          ability.dashTime = a.dashDurationSec;
+          ability.dashCd = a.cooldownSec;
+        }
+
         player.invuln = Math.max(0, player.invuln - dt);
 
         // boss warning timer counts down
@@ -302,7 +425,25 @@ export function useGameEngine(args: {
           }
         }
 
+        for (let i = dmgTexts.length - 1; i >= 0; i--) {
+          const t = dmgTexts[i];
+          t.life -= dt;
+          t.y += t.vy * dt;
+          t.vy += 80 * dt; // gravity-ish slowdown
+          if (t.life <= 0) dmgTexts.splice(i, 1);
+        }
+
         updatePlayer(player, input, dt, { w, h });
+
+        // If dashing, override movement for a short burst (stacks on top of normal movement)
+        if (ability.dashTime > 0) {
+          player.x += ability.dashVX * dt;
+          player.y += ability.dashVY * dt;
+
+          // clamp to bounds
+          player.x = Math.max(player.r, Math.min(w - player.r, player.x));
+          player.y = Math.max(player.r, Math.min(h - player.r, player.y));
+        }
 
         // boss spawn
         bossTimer += dt;
@@ -313,14 +454,12 @@ export function useGameEngine(args: {
           showBossWarning = true;
           bossWarningTimer = 3;
 
-          // optional: only keep if your audio supports it
-          // audio.play("boss_warning", { cooldownMs: 500 });
-
           enemies.push(spawnBoss({ w, h }));
           bossAlive = true;
           bossShootTimer = 0;
 
           audio.play("boss_spawn");
+          args.onBossMusic?.(true); // ✅ switch to boss music
         }
 
         // shooting
@@ -365,11 +504,15 @@ export function useGameEngine(args: {
             }
           }
 
-          audio.play("shoot", { cooldownMs: 35, volumeMul: 0.7 });
+          audio.playShoot({ cooldownMs: 35, volumeMul: 0.7 });
           shootCooldown = 1 / fireRate;
         }
 
         updateBullets(bullets, dt, { w, h });
+
+        for (const b of bullets) {
+          spawnTrail(particles, b.x, b.y);
+        }
 
         // spawn normal enemies
         spawnTimer += dt;
@@ -408,14 +551,32 @@ export function useGameEngine(args: {
 
         updateBullets(enemyBullets, dt, { w, h });
 
+        for (const b of enemyBullets) {
+          spawnTrail(particles, b.x, b.y);
+        }
+
         // collisions
         handleBulletEnemyCollisions({
           bullets,
           enemies,
           bulletDamage,
+
+          onHit: ({ x, y, dmg, kind, killed }) => {
+            spawnExplosion(particles, x, y, 6);
+
+            spawnDamageText(particles, x, y, dmg, {
+              isBoss: kind === "boss",
+              isKill: killed,
+            });
+          },
+
           onKill: ({ kind, x, y }) => {
-            spawnExplosion(particles, x, y, kind === "boss" ? 45 : 18);
-            audio.play("enemy_die", {
+            if (kind !== "boss") {
+              spawnExplosion(particles, x, y, 18);
+              hitStop = 0.03; // normal enemy slow-motion
+            }
+
+            audio.playEnemyDie({
               cooldownMs: 25,
               volumeMul: kind === "boss" ? 1.1 : 0.9,
             });
@@ -436,21 +597,24 @@ export function useGameEngine(args: {
                     finalLevel: level,
                     upgrades: upgradesPicked.slice(),
                   });
+                  awardShardsOnce();
                 }
 
-                // optional: only if you have it
-                // audio.play("victory");
                 args.setPhase("victory");
                 return;
               }
 
               score += 20;
-              xp += 10;
+              xp += 10 * ability.xpMul;
               bossAlive = false;
+              args.onBossMusic?.(false);
+              shake = 35;
+              hitStop = 0.18; // BIG cinematic boss freeze
+              spawnExplosion(particles, x, y, 90);
             } else {
               kills += 1;
               score += 1;
-              xp += 1;
+              xp += 1 * ability.xpMul;
             }
 
             if (xp >= xpToNext) {
@@ -459,6 +623,10 @@ export function useGameEngine(args: {
               xpToNext = Math.ceil(xpToNext * 1.35);
               isLevelUp = true;
               choices = pick3RandomUpgrades();
+              shake = 18;
+              hitStop = 0.06;
+              levelUpFlash = 0.20;
+              zoomKick = 1;
               audio.play("level_up");
             }
           },
@@ -471,12 +639,16 @@ export function useGameEngine(args: {
           player.hp -= 1;
           player.invuln = 1;
           shake = 12;
+
+          hitStop = 0.05;      // 50ms freeze
+          playerFlash = 0.18;  // 180ms flash
+
           audio.play("player_hit", { cooldownMs: 120 });
 
           if (player.hp <= 0) {
             if (!summarySaved) {
               summarySaved = true;
-              audio.play("game_over");
+              audio.play("game_over", { cooldownMs: 250 });
               maybeUpdateHighScore();
               args.setRunSummary({
                 timeSurvivedSec: runTime,
@@ -486,7 +658,9 @@ export function useGameEngine(args: {
                 finalLevel: level,
                 upgrades: upgradesPicked.slice(),
               });
+              awardShardsOnce();
             }
+            args.onBossMusic?.(false);
             args.setPhase("gameover");
           }
         }
@@ -497,20 +671,23 @@ export function useGameEngine(args: {
             const b = enemyBullets[i];
             const dx = b.x - player.x;
             const dy = b.y - player.y;
-            const hit =
-              dx * dx + dy * dy <= (b.r + player.r) * (b.r + player.r);
+            const hit = dx * dx + dy * dy <= (b.r + player.r) * (b.r + player.r);
 
             if (hit) {
               enemyBullets.splice(i, 1);
               player.hp -= 1;
               player.invuln = 1;
               shake = 12;
+
+              hitStop = 0.05;      // 50ms freeze
+              playerFlash = 0.18;  // 180ms flash
+
               audio.play("player_hit", { cooldownMs: 120 });
 
               if (player.hp <= 0) {
                 if (!summarySaved) {
                   summarySaved = true;
-                  audio.play("game_over");
+                  audio.play("game_over", { cooldownMs: 250 });
                   maybeUpdateHighScore();
                   args.setRunSummary({
                     timeSurvivedSec: runTime,
@@ -520,7 +697,9 @@ export function useGameEngine(args: {
                     finalLevel: level,
                     upgrades: upgradesPicked.slice(),
                   });
+                  awardShardsOnce();
                 }
+                args.onBossMusic?.(false);
                 args.setPhase("gameover");
               }
               break;
@@ -537,6 +716,19 @@ export function useGameEngine(args: {
       c.fillRect(0, 0, w, h);
 
       c.save();
+
+      const idleDrift = Math.sin(runTime * 0.6) * 0.5;
+      c.translate(idleDrift, idleDrift);
+
+      // ✅ level-up zoom pulse
+      if (zoomKick > 0) {
+        const z = 1 + 0.06 * zoomKick; // max 6% zoom
+        c.translate(w / 2, h / 2);
+        c.scale(z, z);
+        c.translate(-w / 2, -h / 2);
+      }
+
+
       if (shake > 0) {
         const dx = (Math.random() * 2 - 1) * shake;
         const dy = (Math.random() * 2 - 1) * shake;
@@ -572,7 +764,53 @@ export function useGameEngine(args: {
       drawParticles(c, particles);
       drawPlayer(c, player);
 
+      // ✅ damage numbers
+      c.save();
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+
+      for (const t of dmgTexts) {
+        const a = Math.max(0, Math.min(1, t.life / t.maxLife)); // fade out
+
+        c.globalAlpha = 0.95 * a;
+
+        const size = t.isBoss ? 22 : 14;
+        c.font = `bold ${size}px system-ui`;
+
+        // outline for readability
+        c.lineWidth = 4;
+        c.strokeStyle = "rgba(0,0,0,0.8)";
+        c.strokeText(String(t.value), t.x, t.y);
+
+        // fill
+        c.fillStyle = t.isKill ? "rgba(255,255,255,1)" : "rgba(255,220,120,1)";
+        c.fillText(String(t.value), t.x, t.y);
+      }
+
       c.restore();
+
+      // ✅ player flash overlay (juice)
+      if (playerFlash > 0) {
+        const a = Math.min(1, playerFlash / 0.18); // fade out
+        c.save();
+        c.globalAlpha = 0.35 * a;
+        c.fillStyle = "white";
+        c.beginPath();
+        c.arc(player.x, player.y, player.r + 4, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
+
+      c.restore();
+
+      if (levelUpFlash > 0) {
+        const a = Math.min(1, levelUpFlash / 0.20);
+        c.save();
+        c.globalAlpha = 0.35 * a;
+        c.fillStyle = "white";
+        c.fillRect(0, 0, w, h);
+        c.restore();
+      }
 
       // HUD
       if (currentPhase !== "menu") {

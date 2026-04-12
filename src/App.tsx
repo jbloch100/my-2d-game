@@ -5,7 +5,9 @@ import { GameOverMenu } from "./ui/GameOverMenu";
 import { VictoryMenu } from "./ui/VictoryMenu";
 import { useGameEngine } from "./game/useGameEngine";
 import type { Phase, RunSummary } from "./types";
-
+import { useMeta } from "./meta/useMeta";
+import { audio } from "./game/audio";
+import { music } from "./game/music";
 
 function summarizeUpgrades(upgrades: string[]) {
   if (upgrades.length === 0) return "No upgrades";
@@ -30,6 +32,8 @@ function buildRunCode(s: RunSummary) {
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const meta = useMeta();
+  const bossMusicRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>("menu");
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
@@ -44,26 +48,13 @@ export default function App() {
     return localStorage.getItem("sfxMuted") === "1";
   });
 
-
-  const [highScore, setHighScore] = useState(() => {
-    const raw = localStorage.getItem("highScore");
-    if (!raw) return { bestScore: 0, bestLevel: 0, bestTimeSec: 0 };
-
-    try {
-      const parsed = JSON.parse(raw) as { bestScore?: number; bestLevel?: number; bestTimeSec?: number };
-      return {
-        bestScore: parsed.bestScore ?? 0,
-        bestLevel: parsed.bestLevel ?? 0,
-        bestTimeSec: parsed.bestTimeSec ?? 0,
-      };
-    } catch {
-      return { bestScore: 0, bestLevel: 0, bestTimeSec: 0 };
-    }
-  });
+  useEffect(() => {
+    audio.preload();
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem("highScore", JSON.stringify(highScore));
-  }, [highScore]);
+    music.preload();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("sfxVolume", String(sfxVolume));
@@ -73,10 +64,40 @@ export default function App() {
     localStorage.setItem("sfxMuted", sfxMuted ? "1" : "0");
   }, [sfxMuted]);
 
+  useEffect(() => {
+    audio.setVolume(sfxVolume);
+  }, [sfxVolume]);
+
+  useEffect(() => {
+    audio.setMuted(sfxMuted);
+  }, [sfxMuted]);
+
+  useEffect(() => {
+    music.setMuted(sfxMuted);
+    music.setVolume(sfxVolume * 0.7);
+  }, [sfxVolume, sfxMuted]);
+
+ 
   // Keep a ref of phase for the engine loop
   const phaseRef = useRef<Phase>(phase);
   useEffect(() => {
     phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase === "menu") {
+      bossMusicRef.current = false;
+      music.menu();
+    } else if (phase === "playing" || phase === "paused") {
+      if (bossMusicRef.current) music.boss();
+      else music.gameplay();
+    } else if (phase === "victory") {
+      bossMusicRef.current = false;
+      music.victory();
+    } else if (phase === "gameover") {
+      bossMusicRef.current = false;
+      music.menu();
+    }
   }, [phase]);
 
   const { requestStart } = useGameEngine({
@@ -87,11 +108,34 @@ export default function App() {
     setCopied,
     sfxVolume,
     sfxMuted,
-    highScore,
-    setHighScore,
+
+    // high score lives in meta save now
+    highScore: meta.save.best,
+    setHighScore: meta.setBest,
+
+    // meta progression
+    metaUpgrades: meta.save.upgrades,
+    addShards: meta.addShards,
+
+    selectedCharacter: meta.save.characters.selected,
+
+
+    onBossMusic: (active) => {
+      bossMusicRef.current = active;
+      if (phaseRef.current !== "playing") return;
+      if (active) music.boss();
+      else music.gameplay();
+    },
   });
 
   const runCode = runSummary ? buildRunCode(runSummary) : "";
+
+  function handleResetSave() {
+    meta.reset();
+    setRunSummary(null);
+    setCopied(false);
+    setPhase("menu");
+  }
 
   async function copyRunCode() {
     if (!runSummary) return;
@@ -122,13 +166,27 @@ export default function App() {
             onPlay={() => {
               setCopied(false);
               requestStart();
+              music.gameplay(); // start music ON click (safe)
+                            
               setPhase("playing");
             }}
             sfxVolume={sfxVolume}
             setSfxVolume={setSfxVolume}
             sfxMuted={sfxMuted}
             setSfxMuted={setSfxMuted}
-            highScore={highScore}
+            highScore={meta.save.best}
+
+            // shop props
+            shards={meta.save.shards}
+            metaUpgrades={meta.save.upgrades}
+            canBuy={meta.canBuy}
+            onBuy={meta.buy}
+            onResetSave={handleResetSave}
+
+            characters={meta.save.characters}
+            onSelectCharacter={meta.selectCharacter}
+            canUnlockCharacter={meta.canUnlockCharacter}
+            onUnlockCharacter={meta.unlockCharacter}
           />
         )}
 
@@ -168,7 +226,7 @@ export default function App() {
             }}
           />
         )}
-        
+
         {phase === "victory" && (
           <VictoryMenu
             summary={runSummary}
@@ -186,7 +244,6 @@ export default function App() {
             }}
           />
         )}
-
       </div>
     </div>
   );
