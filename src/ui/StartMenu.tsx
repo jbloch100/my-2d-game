@@ -76,7 +76,17 @@ export function StartMenu({
   return (
     <div style={overlayStyle}>
       <div style={panelStyle}>
-        <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
+        <div 
+          style={{ 
+            fontSize: 44, 
+            fontWeight: 900, 
+            letterSpacing: 3, 
+            color: "white", 
+            textAlign: "center", 
+            textShadow:
+              "0 0 10px rgba(255,255,255,0.8), 0 0 28px rgba(190,80,255,0.85)", 
+            marginBottom: 8,
+          }}>
           Arena Survivor
         </div>
 
@@ -307,13 +317,15 @@ const overlayStyle: React.CSSProperties = {
   inset: 0,
   display: "grid",
   placeItems: "center",
-  background: "rgba(0,0,0,0.65)",
+  background:
+    "radial-gradient(circle at top, rgba(70,40,120,0.45), rgba(0,0,0,0.92))",
+  backdropFilter: "blur(2px)",
   color: "white",
   padding: 24,
 };
 
 const panelStyle: React.CSSProperties = {
-  width: 520,
+  width: 620,
   maxWidth: "90%",
   border: "1px solid rgba(255,255,255,0.25)",
   background: "rgba(0,0,0,0.6)",

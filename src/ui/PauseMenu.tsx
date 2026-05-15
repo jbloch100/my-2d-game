@@ -8,7 +8,7 @@ export function PauseMenu({
   setSfxVolume,
   sfxMuted,
   setSfxMuted,
-}: {
+}: {  
   onResume: () => void;
   onRestart: () => void;
   onQuit: () => void;

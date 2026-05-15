@@ -7,7 +7,7 @@ export type Enemy = {
 	r: number;
 	speed: number;
 	hp: number;
-	kind: "normal" | "boss";
+	kind: "normal" | "boss" | "runner" | "shooter";
   elite?: boolean;
 };
 
@@ -45,22 +45,24 @@ export function spawnEnemy(bounds: { w: number; h: number }): Enemy {
 
 
 export function spawnEliteEnemy(bounds: { w: number; h: number }): Enemy {
+  // spawn just outside one of the 4 sides
   const side = Math.floor(Math.random() * 4);
+  const margin = 50;
 
   let x = 0;
   let y = 0;
 
   if (side === 0) {
     x = Math.random() * bounds.w;
-    y = -30;
+    y = -margin;
   } else if (side === 1) {
-    x = bounds.w + 30;
+    x = bounds.w + margin;
     y = Math.random() * bounds.h;
   } else if (side === 2) {
     x = Math.random() * bounds.w;
-    y = bounds.h + 30;
+    y = bounds.h + margin;
   } else {
-    x = -30;
+    x = -margin;
     y = Math.random() * bounds.h;
   }
 
@@ -68,7 +70,7 @@ export function spawnEliteEnemy(bounds: { w: number; h: number }): Enemy {
     x,
     y,
     r: 22,
-    speed: 95,
+    speed: 95 + Math.random() * 35,
     hp: 5,
     kind: "normal",
     elite: true,
@@ -87,9 +89,71 @@ export function spawnBoss(bounds: { w: number; h: number }): Enemy {
 	};
 }
 
+export function spawnRunnerEnemy(bounds: { w: number; h: number }): Enemy {
+  const side = Math.floor(Math.random() * 4);
+  const margin = 40;
+
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * bounds.w;
+    y = -margin;
+  } else if (side === 1) {
+    x = bounds.w + margin;
+    y = Math.random() * bounds.h;
+  } else if (side === 2) {
+    x = Math.random() * bounds.w;
+    y = bounds.h + margin;
+  } else {
+    x = -margin;
+    y = Math.random() * bounds.h;
+  }
+
+  return {
+    x,
+    y,
+    r: 10,
+    speed: 200 + Math.random() * 80,
+    hp: 1,
+    kind: "runner",
+  };
+}
+
+export function spawnShooterEnemy(bounds: { w: number; h: number }): Enemy {
+  const side = Math.floor(Math.random() * 4);
+  const margin = 40;
+
+  let x = 0;
+  let y = 0;
+
+  if (side === 0) {
+    x = Math.random() * bounds.w;
+    y = -margin;
+  } else if (side === 1) {
+    x = bounds.w + margin;
+    y = Math.random() * bounds.h;
+  } else if (side === 2) {
+    x = Math.random() * bounds.w;
+    y = bounds.h + margin;
+  } else {
+    x = -margin;
+    y = Math.random() * bounds.h;
+  }
+
+  return {
+    x,
+    y,
+    r: 13,
+    speed: 85 + Math.random() * 20,
+    hp: 3,
+    kind: "shooter",
+  };
+}
+
+
 export function updateEnemies(enemies: Enemy[], player: Player, dt: number) {
   for (const e of enemies) {
-    // ✅ tick down hit flash (if it exists)
     (e as any).hitFlash = Math.max(0, ((e as any).hitFlash ?? 0) - dt);
 
     const dx = player.x - e.x;
@@ -98,14 +162,35 @@ export function updateEnemies(enemies: Enemy[], player: Player, dt: number) {
     const ux = dx / len;
     const uy = dy / len;
 
-    e.x += ux * e.speed * dt;
-    e.y += uy * e.speed * dt;
+    if (e.kind === "shooter") {
+      const preferredDist = 220;
+
+      if (len > preferredDist + 20) {
+        e.x += ux * e.speed * dt;
+        e.y += uy * e.speed * dt;
+      } else if (len < preferredDist - 20) {
+        e.x -= ux * e.speed * dt;
+        e.y -= uy * e.speed * dt;
+      } else {
+        // strafe a bit
+        const sx = -uy;
+        const sy = ux;
+        e.x += sx * e.speed * 0.55 * dt;
+        e.y += sy * e.speed * 0.55 * dt;
+      }
+    } else {
+      e.x += ux * e.speed * dt;
+      e.y += uy * e.speed * dt;
+    }
   }
 }
 
 export function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
   for (const e of enemies) {
     const isBoss = e.kind === "boss";
+    const isRunner = e.kind === "runner";
+    const isShooter = e.kind === "shooter";
+    const isElite = e.elite === true;
     const flash = ((e as any).hitFlash ?? 0) as number;
 
     // ✅ flash ring first (so body draws on top)
@@ -120,9 +205,43 @@ export function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
     }
 
     // body
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
-    ctx.fillStyle = isBoss ? "rgba(190,80,255,1)" : "rgba(255,80,80,1)";
+    if (isElite) {
+      const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.12;
+
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = "rgba(255,220,80,1)";
+
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, (e.r + 6) * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    if (isShooter) {
+      ctx.beginPath();
+      ctx.rect(e.x - e.r, e.y - e.r, e.r * 2, e.r * 2);
+    } else if (isRunner) {
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y - e.r);
+      ctx.lineTo(e.x + e.r, e.y + e.r);
+      ctx.lineTo(e.x - e.r, e.y + e.r);
+      ctx.closePath();
+    } else {
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+    }
+
+    ctx.fillStyle = isBoss
+      ? "rgba(190,80,255,1)"
+      : isElite
+      ? "rgba(255,190,60,1)"
+      : isRunner
+      ? "rgba(80,200,255,1)"
+      : isShooter
+      ? "rgba(120,255,120,1)"
+      : "rgba(255,80,80,1)";
     ctx.fill();
 
     // hp bar
@@ -135,7 +254,7 @@ export function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
     ctx.fillRect(px, py, barW, barH);
 
     // ✅ IMPORTANT: match your boss hp max
-    const maxHp = isBoss ? 80 : 2; // was 60 before
+    const maxHp = isBoss ? 80 : isElite ? 5 : isRunner ? 1 : isShooter ? 3 : 2;
     const hpPct = Math.max(0, Math.min(1, e.hp / maxHp));
 
     ctx.fillStyle = "rgba(255,255,255,0.9)";
@@ -147,7 +266,7 @@ export function handleBulletEnemyCollisions(args: {
   bullets: Bullet[];
   enemies: Enemy[];
   bulletDamage: number;
-  onKill?: (info: { kind: Enemy["kind"]; x: number; y: number }) => void;
+  onKill?: (info: { kind: Enemy["kind"]; x: number; y: number; elite?: boolean; }) => void;
   onHit?: (info: {x: number; y: number; dmg: number; kind: Enemy["kind"]; killed: boolean }) => void; // ⭐ NEW
 }) {
   const { bullets, enemies, bulletDamage, onKill, onHit } = args;
@@ -163,11 +282,25 @@ export function handleBulletEnemyCollisions(args: {
       const hit = dx * dx + dy * dy <= (b.r + e.r) * (b.r + e.r);
 
       if (hit) {
-        bullets.splice(bi, 1);
+        if ((b as any).pierceLeft === undefined) {
+          (b as any).pierceLeft = 0;
+        }
 
-        // ✅ real damage dealt (clamp to remaining hp so last-hit looks right)
-        const dealt = Math.min(bulletDamage, e.hp);
-        e.hp -= bulletDamage;
+        if ((b as any).pierceLeft <= 0) {
+          bullets.splice(bi, 1);
+        } else {
+          (b as any).pierceLeft -= 1;
+        }
+
+        const isCrit = Math.random() < ((b as any).critChance ?? 0);
+
+        const dmg = isCrit
+          ? Math.ceil(bulletDamage * ((b as any).critMultiplier ?? 1.5))
+          : bulletDamage;
+
+        const dealt = Math.min(dmg, e.hp);
+
+        e.hp -= dmg;
 
         const killed = e.hp <= 0;
 
@@ -179,7 +312,7 @@ export function handleBulletEnemyCollisions(args: {
 
         if (killed) {
           enemies.splice(ei, 1);
-          onKill?.({ kind: e.kind, x: e.x, y: e.y });
+          onKill?.({ kind: e.kind, x: e.x, y: e.y, elite: e.elite });
         }
 
         break;

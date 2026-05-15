@@ -15,6 +15,9 @@ import {
   handleBulletEnemyCollisions,
   playerIsHit,
   spawnEnemy,
+  spawnEliteEnemy,
+  spawnRunnerEnemy,
+  spawnShooterEnemy,
   spawnBoss,
   updateEnemies,
   type Enemy,
@@ -28,6 +31,12 @@ import {
   spawnDamageText,
   type Particle,
 } from "./particles";
+import {
+  spawnXpPickup,
+  updatePickups,
+  drawPickups,
+  type Pickup,
+} from "./pickups";
 import type { Phase, RunSummary } from "../types";
 import { audio } from "./audio";
 
@@ -117,6 +126,7 @@ export function useGameEngine(args: {
     const particles: Particle[] = [];
     const enemyBullets: Bullet[] = [];
     const dmgTexts: DamageText[] = [];
+    const pickups: Pickup[] = [];
 
     // combat stats
     let fireRate = 10; // bullets/sec
@@ -124,11 +134,22 @@ export function useGameEngine(args: {
     let bulletDamage = 1;
     let shootCooldown = 0;
     let multiShotLevel = 0; // 0=single, 1=3 bullets, 2=5 bullets
+    let chainLevel = 0;
+    let pierceLevel = 0;
+    let critChance = 0;
+    let critMultiplier = 1.5;
+    let droneLevel = 0;
+    let droneHitTimer = 0;
+    let droneAngle = 0;
+    let explosionLevel = 0;
+    let lifestealLevel = 0;
+    let lifestealKills = 0;
 
     // enemies/difficulty
     let spawnTimer = 0;
     let spawnEvery = 0.9;
     let difficultyTimer = 0;
+    let shooterFireTimer = 0;
 
     // boss system
     let bossTimer = 0;
@@ -192,6 +213,24 @@ export function useGameEngine(args: {
         case "multiShot":
           multiShotLevel = Math.min(2, multiShotLevel + 1);
           break;
+        case "chain":
+          chainLevel += 1;
+          break;
+        case "pierce":
+          pierceLevel += 1;
+          break;
+        case "explosion":
+          explosionLevel += 1;
+          break;
+        case "lifesteal":
+          lifestealLevel += 1;
+          break;
+        case "crit":
+          critChance += 0.10;
+          break;
+        case "drone":
+          droneLevel += 1;
+          break;
       }
     }
 
@@ -253,8 +292,12 @@ export function useGameEngine(args: {
       enemies.length = 0;
       particles.length = 0;
       enemyBullets.length = 0;
+      pickups.length = 0;
       hitStop = 0;
       playerFlash = 0;
+      lifestealLevel = 0;
+      lifestealKills = 0;
+      droneHitTimer = 0;
 
       // boss reset
       bossShootTimer = 0;
@@ -296,6 +339,7 @@ export function useGameEngine(args: {
       spawnTimer = 0;
       spawnEvery = 0.9;
       difficultyTimer = 0;
+      shooterFireTimer = 0;
 
       // reset leveling
       level = 1;
@@ -435,6 +479,34 @@ export function useGameEngine(args: {
 
         updatePlayer(player, input, dt, { w, h });
 
+        droneAngle += dt * 2.8;
+
+        droneHitTimer = Math.max(0, droneHitTimer - dt);
+
+        if (droneLevel > 0) {
+          const droneX = player.x + Math.cos(droneAngle) * 48;
+          const droneY = player.y + Math.sin(droneAngle) * 48;
+          const droneR = 9;
+
+          if (droneHitTimer === 0) {
+            for (const e of enemies) {
+              const dx = droneX - e.x;
+              const dy = droneY - e.y;
+              const hit = dx * dx + dy * dy <= (droneR + e.r) * (droneR + e.r);
+
+              if (hit) {
+                e.hp -= droneLevel;
+                (e as any).hitFlash = 0.08;
+                spawnExplosion(particles, droneX, droneY, 4);
+
+                droneHitTimer = 0.25;
+                break;
+              }
+            }
+          }
+        }
+
+
         // If dashing, override movement for a short burst (stacks on top of normal movement)
         if (ability.dashTime > 0) {
           player.x += ability.dashVX * dt;
@@ -478,7 +550,15 @@ export function useGameEngine(args: {
               toY: input.mouse.y,
               speed: bulletSpeed,
             });
-            if (b) bullets.push(b);
+
+            if (b) {
+              (b as any).pierceLeft = pierceLevel;
+
+              (b as any).critChance = critChance;
+              (b as any).critMultiplier = critMultiplier;
+              
+              bullets.push(b);
+            }
           } else {
             const spread = multiShotLevel === 1 ? 0.18 : 0.28;
             const angles =
@@ -493,14 +573,21 @@ export function useGameEngine(args: {
                   ];
 
             for (const a of angles) {
-              bullets.push(
-                spawnBulletByAngle({
-                  fromX: player.x,
-                  fromY: player.y,
-                  angleRad: a,
-                  speed: bulletSpeed,
-                })
-              );
+              const b = spawnBulletByAngle({
+                fromX: player.x,
+                fromY: player.y,
+                angleRad: a,
+                speed: bulletSpeed,
+              });
+
+              if (!b) continue;
+
+              (b as any).pierceLeft = pierceLevel;
+
+              (b as any).critChance = critChance;
+              (b as any).critMultiplier = critMultiplier;
+
+              bullets.push(b);
             }
           }
 
@@ -514,11 +601,22 @@ export function useGameEngine(args: {
           spawnTrail(particles, b.x, b.y);
         }
 
-        // spawn normal enemies
+        // spawn enemies
         spawnTimer += dt;
         if (spawnTimer >= spawnEvery) {
           spawnTimer = 0;
-          enemies.push(spawnEnemy({ w, h }));
+
+          const r = Math.random();
+
+          if (level >= 4 && r < 0.10) {
+            enemies.push(spawnEliteEnemy({ w, h }));
+          } else if (level >= 3 && r < 0.28) {
+            enemies.push(spawnShooterEnemy({ w, h }));
+          } else if(level >= 2 && r < 0.45) {
+            enemies.push(spawnRunnerEnemy({ w, h }));
+          } else {
+            enemies.push(spawnEnemy({ w, h }));
+          }
         }
 
         // difficulty ramp
@@ -530,11 +628,39 @@ export function useGameEngine(args: {
 
         updateEnemies(enemies, player, dt);
 
+        shooterFireTimer += dt;
+        if (shooterFireTimer >= 1.4) {
+          shooterFireTimer = 0;
+
+          for (const e of enemies) {
+            if (e.kind !== "shooter") continue;
+
+            const b = spawnBullet({
+              fromX: e.x,
+              fromY: e.y,
+              toX: player.x,
+              toY: player.y,
+              speed: 300,
+            });
+
+            if (b) {
+              b.r = 5;
+              b.life = 2.2;
+              enemyBullets.push(b);
+            }
+          }
+        }
+
         // boss shooting
         bossShootTimer += dt;
+
         const boss = enemies.find((e) => e.kind === "boss");
-        if (boss && bossShootTimer >= 1.2) {
+        const bossFireRate = boss && boss.hp <= BOSS_MAX_HP * 0.3 ? 0.65 : 1.2;
+
+        if (boss && bossShootTimer >= bossFireRate) {
           bossShootTimer = 0;
+
+          // normal aimed shot
           const b = spawnBullet({
             fromX: boss.x,
             fromY: boss.y,
@@ -542,10 +668,33 @@ export function useGameEngine(args: {
             toY: player.y,
             speed: 380,
           });
+
           if (b) {
             b.r = 7;
             b.life = 2.5;
             enemyBullets.push(b);
+          }
+
+          // radial burst below 70% HP
+          if (boss.hp <= BOSS_MAX_HP * 0.7 && Math.random() < 0.45) {
+            for (let i = 0; i < 12; i++) {
+              const angle = (Math.PI * 2 * i) / 12;
+
+              const rb = spawnBulletByAngle({
+                fromX: boss.x,
+                fromY: boss.y,
+                angleRad: angle,
+                speed: 240,
+              });
+
+              if (rb) {
+                rb.r = 6;
+                rb.life = 3;
+                enemyBullets.push(rb);
+              }
+            }
+
+            shake = Math.max(shake, 10);
           }
         }
 
@@ -568,9 +717,88 @@ export function useGameEngine(args: {
               isBoss: kind === "boss",
               isKill: killed,
             });
+
+            if (chainLevel > 0) {
+              const maxChains = chainLevel; // 1 or more jumps
+
+              let lastX = x;
+              let lastY = y;
+
+              for (let i = 0; i < maxChains; i++) {
+                let closest: Enemy | null = null;
+                let bestDist = 120 * 120;
+
+                for (const other of enemies) {
+                  const dx = other.x - lastX;
+                  const dy = other.y - lastY;
+                  const d2 = dx * dx + dy * dy;
+
+                  if (d2 < bestDist) {
+                    bestDist = d2;
+                    closest = other;
+                  }
+                }
+
+                if (!closest) break;
+
+                // damage
+                const dealt = Math.min(bulletDamage, closest.hp);
+                closest.hp -= bulletDamage;
+
+                spawnDamageText(particles, closest.x, closest.y, dealt, {
+                  isBoss: closest.kind === "boss",
+                });
+
+                spawnExplosion(particles, closest.x, closest.y, 6);
+
+                lastX = closest.x;
+                lastY = closest.y;
+
+                if (closest.hp <= 0) {
+                  enemies.splice(enemies.indexOf(closest), 1);
+                }
+              }
+            }
+
+            if (explosionLevel > 0) {
+              const radius = 60 + explosionLevel * 10; // scales a bit
+              const r2 = radius * radius;
+
+              for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+
+                const dx = e.x - x;
+                const dy = e.y - y;
+                const d2 = dx * dx + dy * dy;
+
+                if (d2 > r2) continue;
+
+                // deal damage (slightly reduced vs direct hit)
+                const aoeDmg = Math.max(1, Math.floor(bulletDamage * 0.75));
+                const dealt = Math.min(aoeDmg, e.hp);
+                e.hp -= aoeDmg;
+
+                // visuals
+                spawnDamageText(particles, e.x, e.y, dealt, {
+                  isBoss: e.kind === "boss",
+                });
+                spawnExplosion(particles, e.x, e.y, 6);
+
+                if (e.hp <= 0) {
+                  enemies.splice(i, 1);
+                  // optional: you can also trigger your onKill effects here if you want full rewards
+                }
+              }
+
+              // main explosion visual at impact point
+              spawnExplosion(particles, x, y, 20);
+
+              shake = Math.max(shake, 10);
+              hitStop = Math.max(hitStop, 0.03);
+            }
           },
 
-          onKill: ({ kind, x, y }) => {
+          onKill: ({ kind, x, y, elite }) => {
             if (kind !== "boss") {
               spawnExplosion(particles, x, y, 18);
               hitStop = 0.03; // normal enemy slow-motion
@@ -611,10 +839,51 @@ export function useGameEngine(args: {
               shake = 35;
               hitStop = 0.18; // BIG cinematic boss freeze
               spawnExplosion(particles, x, y, 90);
+              spawnXpPickup(pickups, x, y, 12);
             } else {
               kills += 1;
-              score += 1;
-              xp += 1 * ability.xpMul;
+
+              if (lifestealLevel > 0) {
+                lifestealKills += 1;
+
+                const killsNeeded = Math.max(3, 8 - lifestealLevel);
+
+                if (lifestealKills >= killsNeeded) {
+                  lifestealKills = 0;
+
+                  if (player.hp < player.maxHp) {
+                    player.hp += 1;
+                    spawnDamageText(particles, player.x, player.y - 18, 1, {
+                      isKill: true,
+                    });
+                    audio.play("level_up", { cooldownMs: 300, volumeMul: 0.5 });
+                  }
+                }
+              }
+              
+              if (kind === "runner") {
+                score += 2;
+                xp += 2 * ability.xpMul;
+              } else if (kind === "shooter") {
+                score += 3;
+                xp += 3 * ability.xpMul;
+              } else {
+                score += elite ? 3 : 1;
+                xp += (elite ? 3 : 1) * ability.xpMul;
+              }
+
+              spawnXpPickup(
+                pickups,
+                x,
+                y,
+                elite ? 3 : kind === "runner" ? 2 : 1
+              );
+
+              if(elite) {
+                shake = 18;
+                hitStop = 0.06;
+                spawnExplosion(particles, x, y, 30);
+              }
             }
 
             if (xp >= xpToNext) {
@@ -633,6 +902,29 @@ export function useGameEngine(args: {
         });
 
         updateParticles(particles, dt);
+
+        updatePickups(pickups, player, (p) => {
+          xp += p.value;
+
+          spawnDamageText(
+            particles,
+            player.x,
+            player.y - 28,
+            p.value
+          );
+
+          if (xp >= xpToNext) {
+            level += 1;
+            xp = 0;
+            xpToNext = Math.ceil(xpToNext * 1.35);
+            isLevelUp = true;
+            choices = pick3RandomUpgrades();
+
+            shake = 18;
+            hitStop = 0.06;
+            audio.play("level_up");
+          }
+        });
 
         // player damage from touching enemies
         if (playerIsHit(player, enemies) && player.invuln === 0) {
@@ -762,7 +1054,25 @@ export function useGameEngine(args: {
 
       drawEnemies(c, enemies);
       drawParticles(c, particles);
+      drawPickups(c, pickups);
       drawPlayer(c, player);
+
+      if (droneLevel > 0) {
+        const droneX = player.x + Math.cos(droneAngle) * 48;
+        const droneY = player.y + Math.sin(droneAngle) * 48;
+
+        c.save();
+        c.fillStyle = "rgba(120,180,255,1)";
+        c.beginPath();
+        c.arc(droneX, droneY, 9, 0, Math.PI * 2);
+        c.fill();
+
+        c.globalAlpha = 0.35;
+        c.beginPath();
+        c.arc(droneX, droneY, 15, 0, Math.PI * 2);
+        c.fill();
+        c.restore();
+      }
 
       // ✅ damage numbers
       c.save();
@@ -898,10 +1208,22 @@ export function useGameEngine(args: {
           const u = choices[i];
           const y = startY + i * 90;
 
-          c.fillStyle = "rgba(255,255,255,0.12)";
+          const bg =
+            u.rarity === "epic"
+              ? "rgba(255,120,255,0.22)"
+              : u.rarity === "rare"
+              ? "rgba(120,180,255,0.22)"
+              : "rgba(255,255,255,0.12)";
+
+          c.fillStyle = bg;
           c.fillRect(w / 2 - 260, y - 30, 520, 70);
 
-          c.fillStyle = "white";
+          c.fillStyle =
+            u.rarity === "epic"
+              ? "rgb(255,120,255)"
+              : u.rarity === "rare"
+              ? "rgb(120,180,255)"
+              : "white";
           c.font = "18px system-ui";
           c.fillText(`${i + 1}) ${u.title}`, w / 2, y);
 
@@ -926,5 +1248,7 @@ export function useGameEngine(args: {
     // IMPORTANT: args is an object; if you find re-runs, pass stable callbacks from App.
   }, [args]);
 
-  return { requestStart };
+  return { 
+    requestStart,
+  };
 }
