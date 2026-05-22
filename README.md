@@ -5,7 +5,7 @@ Survive escalating waves, level up with upgrades, and defeat the boss.
 
 ## Live Demo
 
-https://https://my-2d-game.vercel.app/
+https://my-2d-game.vercel.app/
 
 ## Controls
 - **WASD** — Move  
