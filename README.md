@@ -4,7 +4,8 @@ A fast, top-down 2D arena shooter built with **React + TypeScript** and rendered
 Survive escalating waves, level up with upgrades, and defeat the boss.
 
 ## Live Demo
-- (Add your Vercel link here after deploy)
+
+https://https://my-2d-game.vercel.app/
 
 ## Controls
 - **WASD** — Move  
