@@ -1126,7 +1126,7 @@ export function useGameEngine(args: {
       if (currentPhase !== "menu") {
         c.fillStyle = "rgba(255,255,255,0.9)";
         c.font = "14px system-ui";
-        c.fillText("WASD • Hold click • ESC pause • R restart", 12, 22);
+        c.fillText("WASD / touch move • Hold click / touch shoot • ESC pause • R restart", 12, 22);
         c.fillText(`HP: ${player.hp}/${player.maxHp}`, 12, 42);
         c.fillText(`Score: ${score}`, 12, 62);
         c.fillText(`Level: ${level}`, 12, 82);

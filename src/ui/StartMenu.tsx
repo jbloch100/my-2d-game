@@ -78,14 +78,14 @@ export function StartMenu({
       <div style={panelStyle}>
         <div 
           style={{ 
-            fontSize: 44, 
-            fontWeight: 900, 
-            letterSpacing: 3, 
-            color: "white", 
-            textAlign: "center", 
+            fontSize: 42,
+            fontWeight: 800,
+            marginBottom: 12,
+            letterSpacing: 1,
+            textAlign: "center",
+            color: "white",
             textShadow:
-              "0 0 10px rgba(255,255,255,0.8), 0 0 28px rgba(190,80,255,0.85)", 
-            marginBottom: 8,
+              "0 0 10px rgba(255,255,255,0.9), 0 0 30px rgba(160,120,255,0.85)",
           }}>
           Arena Survivor
         </div>
@@ -133,10 +133,14 @@ export function StartMenu({
                 <div
                   key={id}
                   style={{
-                    border: "1px solid rgba(255,255,255,0.2)",
+                    border: selected
+                      ? "1px solid rgba(140,180,255,0.75)"
+                      : "1px solid rgba(255,255,255,0.18)",
                     background: selected
-                      ? "rgba(60,120,255,0.20)"
+                      ? "linear-gradient(90deg, rgba(60,120,255,0.28), rgba(120,80,255,0.16))"
                       : "rgba(0,0,0,0.35)",
+                    boxShadow: selected ? "0 0 18px rgba(90,130,255,0.35)" : "none",
+                    borderRadius: 8,
                     padding: 10,
                   }}
                 >
@@ -206,8 +210,9 @@ export function StartMenu({
                 <div
                   key={id}
                   style={{
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    background: "rgba(0,0,0,0.35)",
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    background: "rgba(255,255,255,0.06)",
+                    borderRadius: 8,
                     padding: 10,
                   }}
                 >
@@ -318,7 +323,7 @@ const overlayStyle: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
   background:
-    "radial-gradient(circle at top, rgba(70,40,120,0.45), rgba(0,0,0,0.92))",
+    "radial-gradient(circle at top, rgba(70,40,120,0.55), rgba(0,0,0,0.95))",
   backdropFilter: "blur(2px)",
   color: "white",
   padding: 24,
@@ -327,8 +332,11 @@ const overlayStyle: React.CSSProperties = {
 const panelStyle: React.CSSProperties = {
   width: 620,
   maxWidth: "90%",
-  border: "1px solid rgba(255,255,255,0.25)",
-  background: "rgba(0,0,0,0.6)",
+  maxHeight: "92vh",
+  overflowY: "auto",
+  border: "1px solid rgba(180,140,255,0.35)",
+  background: "rgba(10,10,20,0.78)",
+  boxShadow: "0 0 35px rgba(120,80,255,0.25)",
   padding: 18,
 };
 

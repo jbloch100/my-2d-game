@@ -153,8 +153,8 @@ export default function App() {
     <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
       <div
         style={{
-          width: 900,
-          height: 550,
+          width: "min(96vw, 900px)",
+          height: "min(70vh, 550px)",
           border: "1px solid #333",
           position: "relative",
         }}
